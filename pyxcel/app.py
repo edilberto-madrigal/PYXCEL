@@ -12,9 +12,19 @@ from PySide6.QtWidgets import (
     QSplitter,
     QDockWidget,
     QTextEdit,
+    QListWidget,
+    QListWidgetItem,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QLineEdit,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QKeySequence, QAction, QClipboard
+from PySide6.QtGui import QKeySequence, QAction, QClipboard, QFont, QTextCursor
+
+import sys
+import os
+import io
+from contextlib import redirect_stdout
 
 import sys
 import os
@@ -36,6 +46,107 @@ from .engine.formulas import FormulaEngine
 from .macros.macro_system import macro_manager, MacroRunner
 
 
+class TerminalWidget(QTextEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setFont(QFont("Consolas", 11))
+        self.setStyleSheet("background-color: #000000; color: #00ff00;")
+        self._history = []
+        self._history_index = -1
+        self._command = ""
+
+        self.append(
+            "<span style='color: #00ff00;'>Microsoft Windows [Versión 10.0.19045.1288]</span>"
+        )
+        self.append(
+            "<span style='color: #00ff00;'> (c) Microsoft Corporation. Todos los derechos reservados.</span>"
+        )
+        self.append("")
+        self._prompt()
+
+    def _prompt(self):
+        self.append("<span style='color: #00ff00;'>&gt;</span> ")
+        self.moveCursor(QTextCursor.MoveOperation.End)
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Return:
+            self._execute_command()
+            return
+        elif event.key() == Qt.Key.Key_Up:
+            self._history_navigate(-1)
+            return
+        elif event.key() == Qt.Key.Key_Down:
+            self._history_navigate(1)
+            return
+
+        super().keyPressEvent(event)
+
+    def _execute_command(self):
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
+        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+        command = cursor.selectedText().strip()
+
+        if command.startswith("> "):
+            command = command[2:]
+
+        self.append("")
+
+        if command:
+            self._history.append(command)
+            self._history_index = len(self._history)
+            self._run_python(command)
+
+        self._prompt()
+
+    def _run_python(self, command):
+        try:
+            old_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+
+            try:
+                result = eval(command, {"__builtins__": __builtins__}, {})
+                output = sys.stdout.getvalue()
+                if output:
+                    self.append(
+                        f"<span style='color: #00ff00;'>{output.rstrip()}</span>"
+                    )
+                if result is not None:
+                    self.append(f"<span style='color: #00ff00;'>{repr(result)}</span>")
+            except SyntaxError:
+                try:
+                    exec(command, {"__builtins__": __builtins__}, {})
+                    output = sys.stdout.getvalue()
+                    if output:
+                        self.append(
+                            f"<span style='color: #00ff00;'>{output.rstrip()}</span>"
+                        )
+                except Exception as e:
+                    self.append(f"<span style='color: #ff0000;'>Error: {e}</span>")
+            finally:
+                sys.stdout = old_stdout
+        except Exception as e:
+            self.append(f"<span style='color: #ff0000;'>Error: {e}</span>")
+
+    def _history_navigate(self, direction):
+        if not self._history:
+            return
+
+        self._history_index += direction
+
+        if self._history_index < 0:
+            self._history_index = 0
+        elif self._history_index >= len(self._history):
+            self._history_index = len(self._history) - 1
+            return
+
+        cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
+        cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
+        cursor.removeSelectedText()
+        cursor.insertText(f">>> {self._history[self._history_index]}")
+
+
 class PYXCEL(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -50,8 +161,8 @@ class PYXCEL(QMainWindow):
         self._connect_signals()
         self._create_default_sheet()
 
-        self.setWindowTitle("PYXCEL - Hoja de Cálculo")
-        self.resize(1200, 800)
+        self.setWindowTitle("PYXCEL")
+        self.resize(900, 600)
 
     def _setup_ui(self):
         self.toolbar_manager = ToolbarManager(self)
@@ -63,20 +174,88 @@ class PYXCEL(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
 
-        main_layout = QVBoxLayout(central_widget)
+        main_layout = QHBoxLayout(central_widget)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+
+        self._create_left_panel()
+
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        self.splitter.addWidget(self.left_panel)
+
+        self.right_panel = QWidget()
+        right_layout = QVBoxLayout(self.right_panel)
+        right_layout.setContentsMargins(1, 1, 1, 1)
+        right_layout.setSpacing(0)
+
+        self.output_tabs = QTabWidget()
+        self.output_tabs.setTabPosition(QTabWidget.TabPosition.South)
+
+        self.terminal = TerminalWidget()
+
+        self.spreadsheet_tab = QWidget()
+        spreadsheet_layout = QVBoxLayout(self.spreadsheet_tab)
+        spreadsheet_layout.setContentsMargins(0, 0, 0, 0)
 
         self.sheet_tabs = QTabWidget()
         self.sheet_tabs.setTabPosition(QTabWidget.TabPosition.South)
         self.sheet_tabs.setTabsClosable(True)
         self.sheet_tabs.tabCloseRequested.connect(self._close_tab)
 
-        main_layout.addWidget(self.sheet_tabs)
+        spreadsheet_layout.addWidget(self.sheet_tabs)
 
-        self.statusBar().showMessage("Listo")
+        self.output_tabs.addTab(self.terminal, "Terminal")
+        self.output_tabs.addTab(self.spreadsheet_tab, "Editor")
+
+        right_layout.addWidget(self.output_tabs)
+
+        self.splitter.addWidget(self.right_panel)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 4)
+
+        main_layout.addWidget(self.splitter)
+
+        self.statusBar().showMessage("Ready")
 
         self._create_sheet_tab("Hoja1")
 
         self.sheet_tabs.currentChanged.connect(self._on_sheet_changed)
+
+    def _create_left_panel(self):
+        self.left_panel = QWidget()
+        left_layout = QVBoxLayout(self.left_panel)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+
+        self.left_tabs = QTabWidget()
+        self.left_tabs.setTabPosition(QTabWidget.TabPosition.West)
+
+        self.shell_list = QListWidget()
+        self.shell_list.addItems(
+            [
+                ">>> Restarts: 1",
+                "KeyboardInterrupt",
+                "--",
+            ]
+        )
+        self.shell_list.setMaximumWidth(120)
+
+        self.browser_tree = QTreeWidget()
+        self.browser_tree.setHeaderLabel("Explorador")
+        self.browser_tree.setMaximumWidth(150)
+
+        root_item = QTreeWidgetItem(["PYXCEL"])
+        child1 = QTreeWidgetItem(["Hoja1"])
+        root_item.addChild(child1)
+        self.browser_tree.addTopLevelItem(root_item)
+        self.browser_tree.expandAll()
+
+        self.left_tabs.addTab(self.shell_list, "Terminal")
+        self.left_tabs.addTab(self.browser_tree, "Explorador")
+
+        left_layout.addWidget(self.left_tabs)
+
+        self.left_panel.setFixedWidth(170)
 
     def _create_sheet_tab(self, name: str = None):
         if name is None:
