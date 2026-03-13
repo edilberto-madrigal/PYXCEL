@@ -7,17 +7,37 @@ from typing import List, Tuple, Optional
 
 
 class ChartBuilder:
+    # Catppuccin color palette for charts
+    COLORS = [
+        "#89B4FA",  # Blue
+        "#A6E3A1",  # Green
+        "#F9E2AF",  # Yellow
+        "#FAB387",  # Peach
+        "#CBA6F7",  # Mauve
+        "#94E2D5",  # Teal
+        "#F38BA8",  # Red
+        "#74C7EC",  # Sapphire
+    ]
+
     def __init__(self):
         self.figure = None
         self.canvas = None
         self._setup_style()
 
     def _setup_style(self):
-        sns.set_style("whitegrid")
+        sns.set_style("darkgrid")
         plt.rcParams["font.size"] = 10
+        plt.rcParams["text.color"] = "#CDD6F4"
+        plt.rcParams["axes.labelcolor"] = "#CDD6F4"
+        plt.rcParams["xtick.color"] = "#CDD6F4"
+        plt.rcParams["ytick.color"] = "#CDD6F4"
+        plt.rcParams["axes.edgecolor"] = "#45475A"
+        plt.rcParams["axes.facecolor"] = "#1E1E2E"
+        plt.rcParams["figure.facecolor"] = "#1E1E2E"
 
     def create_canvas(self, width: float = 6, height: float = 4) -> FigureCanvasQTAgg:
         self.figure = Figure(figsize=(width, height), dpi=100)
+        self.figure.patch.set_facecolor("#1E1E2E")
         self.canvas = FigureCanvasQTAgg(self.figure)
         return self.canvas
 
@@ -36,13 +56,13 @@ class ChartBuilder:
         labels = list(data.keys())
         values = list(data.values())
 
-        bars = ax.bar(labels, values, color=sns.color_palette("husl", len(labels)))
+        colors = self.COLORS[: len(labels)]
+        bars = ax.bar(labels, values, color=colors)
 
-        ax.set_title(title)
-        if x_label:
-            ax.set_xlabel(x_label)
-        if y_label:
-            ax.set_ylabel(y_label)
+        ax.set_title(title, color="#CDD6F4")
+        ax.set_xlabel(x_label, color="#A6ADC8") if x_label else None
+        ax.set_ylabel(y_label, color="#A6ADC8") if y_label else None
+        ax.tick_params(colors="#CDD6F4")
 
         for bar in bars:
             height = bar.get_height()
@@ -52,6 +72,7 @@ class ChartBuilder:
                 f"{height:.0f}",
                 ha="center",
                 va="bottom",
+                color="#CDD6F4",
             )
 
         self.figure.tight_layout()
@@ -217,6 +238,77 @@ class ChartBuilder:
         if y_label:
             ax.set_ylabel(y_label)
         ax.legend()
+
+        self.figure.tight_layout()
+        return self.canvas
+
+    def create_stacked_line_chart(
+        self,
+        data: dict,
+        title: str = "Líneas Apiladas",
+        x_label: str = "",
+        y_label: str = "",
+    ):
+        if not self.figure:
+            self.create_canvas()
+
+        ax = self.figure.add_subplot(111)
+
+        categories = list(data.keys())
+
+        for i, (key, value) in enumerate(data.items()):
+            ax.plot(
+                categories,
+                list(value.values()) if isinstance(value, dict) else [value],
+                marker="o",
+                linewidth=2,
+                label=key,
+                color=self.COLORS[i % len(self.COLORS)],
+            )
+
+        ax.set_title(title, color="#CDD6F4")
+        if x_label:
+            ax.set_xlabel(x_label, color="#A6ADC8")
+        if y_label:
+            ax.set_ylabel(y_label, color="#A6ADC8")
+        ax.tick_params(colors="#CDD6F4")
+        ax.legend(labelcolor="#CDD6F4")
+
+        self.figure.tight_layout()
+        return self.canvas
+
+    def create_stacked_area_chart(
+        self,
+        data: dict,
+        title: str = "Área Apilada",
+        x_label: str = "",
+        y_label: str = "",
+    ):
+        if not self.figure:
+            self.create_canvas()
+
+        ax = self.figure.add_subplot(111)
+
+        categories = list(data.keys())
+
+        y_data = []
+        for key, value in data.items():
+            y_data.append(list(value.values()) if isinstance(value, dict) else [value])
+
+        ax.stackplot(
+            categories,
+            *y_data,
+            labels=list(data.keys()),
+            colors=self.COLORS[: len(data)],
+        )
+
+        ax.set_title(title, color="#CDD6F4")
+        if x_label:
+            ax.set_xlabel(x_label, color="#A6ADC8")
+        if y_label:
+            ax.set_ylabel(y_label, color="#A6ADC8")
+        ax.tick_params(colors="#CDD6F4")
+        ax.legend(labelcolor="#CDD6F4")
 
         self.figure.tight_layout()
         return self.canvas

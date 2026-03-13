@@ -1,7 +1,7 @@
 [project]
 name = "pyxcel"
 version = "0.1.0"
-description = "Add your description here"
+description = "Aplicación de hoja de cálculo estilo Python IDLE con PySide6"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -15,3 +15,17 @@ dependencies = [
     "seaborn>=0.13.2",
     "xlsxwriter>=3.2.9",
 ]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "pytest-qt>=4.4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"

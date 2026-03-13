@@ -1,13 +1,16 @@
 from openpyxl import Workbook as OpenpyxlWorkbook, load_workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QColor
 import csv
+import json
 from typing import Optional
 import os
 
 from ..models.spreadsheet import SpreadsheetModel, CellData, CellFormat
 from ..models.workbook import Workbook
+from ..macros.macro_system import macro_manager
 
 
 class FileManager(QObject):
@@ -91,17 +94,31 @@ class FileManager(QObject):
 
             if openpyxl_cell.font.color and openpyxl_cell.font.color.rgb:
                 color = openpyxl_cell.font.color.rgb
-                if len(color) == 6:
-                    cell_data.format.font_color = QColor(
-                        int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
-                    )
+                if isinstance(color, str):
+                    if len(color) == 6:
+                        cell_data.format.font_color = QColor(
+                            int(color[0:2], 16),
+                            int(color[2:4], 16),
+                            int(color[4:6], 16),
+                        )
+                    elif len(color) == 8:  # ARGB
+                        cell_data.format.font_color = QColor(
+                            int(color[2:4], 16),
+                            int(color[4:6], 16),
+                            int(color[6:8], 16),
+                        )
 
         if openpyxl_cell.fill and openpyxl_cell.fill.fgColor:
             color = openpyxl_cell.fill.fgColor.rgb
-            if color and len(color) == 6:
-                cell_data.format.bg_color = QColor(
-                    int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
-                )
+            if isinstance(color, str):
+                if len(color) == 6:
+                    cell_data.format.bg_color = QColor(
+                        int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
+                    )
+                elif len(color) == 8:  # ARGB
+                    cell_data.format.bg_color = QColor(
+                        int(color[2:4], 16), int(color[4:6], 16), int(color[6:8], 16)
+                    )
 
         if openpyxl_cell.alignment:
             h_align = openpyxl_cell.alignment.horizontal
@@ -227,17 +244,27 @@ class FileManager(QObject):
                 size=cell_data.format.font_size
             )
 
-        r, g, b, _ = cell_data.format.font_color.rgba()
-        if (r, g, b) != (0, 0, 0):
-            openpyxl_cell.font = openpyxl_cell.font.copy(color=f"{r:02x}{g:02x}{b:02x}")
+        try:
+            if hasattr(cell_data.format.font_color, "rgba"):
+                r, g, b, _ = cell_data.format.font_color.rgba()
+                if (r, g, b) != (0, 0, 0):
+                    openpyxl_cell.font = openpyxl_cell.font.copy(
+                        color=f"{r:02x}{g:02x}{b:02x}"
+                    )
+        except:
+            pass
 
-        r, g, b, _ = cell_data.format.bg_color.rgba()
-        if (r, g, b) != (255, 255, 255):
-            openpyxl_cell.fill = PatternFill(
-                start_color=f"{r:02x}{g:02x}{b:02x}",
-                end_color=f"{r:02x}{g:02x}{b:02x}",
-                fill_type="solid",
-            )
+        try:
+            if hasattr(cell_data.format.bg_color, "rgba"):
+                r, g, b, _ = cell_data.format.bg_color.rgba()
+                if (r, g, b) != (255, 255, 255):
+                    openpyxl_cell.fill = PatternFill(
+                        start_color=f"{r:02x}{g:02x}{b:02x}",
+                        end_color=f"{r:02x}{g:02x}{b:02x}",
+                        fill_type="solid",
+                    )
+        except:
+            pass
 
     def _save_csv(self, file_path: str, workbook: Workbook) -> bool:
         try:
@@ -267,6 +294,63 @@ class FileManager(QObject):
 
         except Exception as e:
             self.error_occurred.emit(f"Error al guardar CSV: {str(e)}")
+            return False
+
+    def save_macros(self, file_path: str) -> bool:
+        try:
+            return macro_manager.save_to_file(file_path)
+        except Exception as e:
+            self.error_occurred.emit(f"Error al guardar macros: {str(e)}")
+            return False
+
+    def load_macros(self, file_path: str) -> bool:
+        try:
+            return macro_manager.load_from_file(file_path)
+        except Exception as e:
+            self.error_occurred.emit(f"Error al cargar macros: {str(e)}")
+            return False
+
+    def export_macros_to_excel(self, file_path: str, workbook: Workbook) -> bool:
+        try:
+            wb = OpenpyxlWorkbook()
+
+            if "Sheet" in wb.sheetnames:
+                del wb["Sheet"]
+
+            macros_sheet = wb.create_sheet("_PYXCEL_MACROS")
+
+            macros_data = macro_manager.serialize()
+            macros_json = json.dumps(macros_data, indent=2)
+
+            macros_sheet["A1"] = macros_json
+
+            for col in range(1, 2):
+                macros_sheet.column_dimensions[get_column_letter(col)].width = 100
+
+            wb.save(file_path)
+            return True
+
+        except Exception as e:
+            self.error_occurred.emit(f"Error al exportar macros: {str(e)}")
+            return False
+
+    def import_macros_from_excel(self, file_path: str) -> bool:
+        try:
+            wb = load_workbook(file_path)
+
+            if "_PYXCEL_MACROS" in wb.sheetnames:
+                macros_sheet = wb["_PYXCEL_MACROS"]
+                macros_json = macros_sheet["A1"].value
+
+                if macros_json:
+                    macros_data = json.loads(macros_json)
+                    macro_manager.deserialize(macros_data)
+                    return True
+
+            return False
+
+        except Exception as e:
+            self.error_occurred.emit(f"Error al importar macros: {str(e)}")
             return False
 
     def get_current_file_path(self) -> Optional[str]:

@@ -10,6 +10,14 @@ class Workbook:
         self._active_sheet: int = 0
         self._file_path: Optional[str] = None
         self._is_modified: bool = False
+        self._macros: Dict[str, Any] = {}
+
+    def set_macros(self, macros: Dict[str, Any]):
+        self._macros = macros
+        self._is_modified = True
+
+    def get_macros(self) -> Dict[str, Any]:
+        return self._macros
 
     def add_sheet(
         self, name: str = None, rows: int = 100, cols: int = 26
@@ -73,6 +81,9 @@ class Workbook:
             self._sheet_names[index] = name
             self._is_modified = True
 
+    def rename_sheet(self, index: int, name: str):
+        self.set_sheet_name(index, name)
+
     def sheet_count(self) -> int:
         return len(self._sheets)
 
@@ -83,12 +94,18 @@ class Workbook:
         if 0 <= index < len(self._sheets):
             self._active_sheet = index
 
+    def get_active_sheet(self) -> int:
+        return self._active_sheet
+
     def current_sheet(self) -> Optional[SpreadsheetModel]:
         if 0 <= self._active_sheet < len(self._sheets):
             return self._sheets[self._active_sheet]
         return None
 
     def file_path(self) -> Optional[str]:
+        return self._file_path
+
+    def get_file_path(self) -> Optional[str]:
         return self._file_path
 
     def set_file_path(self, path: str):

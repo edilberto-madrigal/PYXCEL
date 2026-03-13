@@ -17,9 +17,22 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QLineEdit,
+    QDialog,
+    QScrollArea,
+    QPushButton,
+    QSplashScreen,
 )
 from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QKeySequence, QAction, QClipboard, QFont, QTextCursor
+from PySide6.QtGui import QKeySequence, QAction, QClipboard, QFont, QTextCursor, QColor
+
+from .ui.theme import (
+    theme_manager,
+    ThemeColors,
+    ThemeFonts,
+    get_terminal_style,
+    get_app_stylesheet,
+    get_palette,
+)
 
 import sys
 import os
@@ -49,23 +62,48 @@ from .macros.macro_system import macro_manager, MacroRunner
 class TerminalWidget(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFont(QFont("Consolas", 11))
-        self.setStyleSheet("background-color: #000000; color: #00ff00;")
-        self._history = []
-        self._history_index = -1
-        self._command = ""
+
+        # Modern terminal styling
+        self.setFont(QFont(ThemeFonts.MONO, 11))
+        self.update_style()
+
+    def update_style(self):
+        self.setStyleSheet(get_terminal_style())
+        
+        # Persistent globals for the shell
+        self._globals = {
+            "__builtins__": __builtins__,
+            "print": print, # Ensure print is available
+        }
+
+        # Python namespace for variables
+        import builtins
+
+        self._namespace = {"__builtins__": builtins}
 
         self.append(
-            "<span style='color: #00ff00;'>Microsoft Windows [Versión 10.0.19045.1288]</span>"
+            f"<span style='color: {ThemeColors.OVERLAY0};'>+-------------------------------------------------------------+</span>"
         )
         self.append(
-            "<span style='color: #00ff00;'> (c) Microsoft Corporation. Todos los derechos reservados.</span>"
+            f"<span style='color: {ThemeColors.BLUE};'>|</span> "
+            f"<span style='color: {ThemeColors.MAUVE}; font-weight: bold;'>PYXCEL Python Terminal</span> "
+            f"<span style='color: {ThemeColors.BLUE};'>|</span>"
+        )
+        self.append(
+            f"<span style='color: {ThemeColors.OVERLAY0};'>|</span> <span style='color: {ThemeColors.SUBTEXT0};'>Use !pip install &lt;package&gt; to install libraries</span> "
+            f"<span style='color: {ThemeColors.BLUE};'>|</span>"
+        )
+        self.append(
+            f"<span style='color: {ThemeColors.OVERLAY0};'>+-------------------------------------------------------------+</span>"
         )
         self.append("")
         self._prompt()
 
     def _prompt(self):
-        self.append("<span style='color: #00ff00;'>&gt;</span> ")
+        self.append(
+            f"<span style='color: {ThemeColors.TEAL};'>&gt;&gt;&gt;</span> "
+            f"<span style='color: {ThemeColors.GREEN};'></span>"
+        )
         self.moveCursor(QTextCursor.MoveOperation.End)
 
     def keyPressEvent(self, event):
@@ -81,52 +119,132 @@ class TerminalWidget(QTextEdit):
 
         super().keyPressEvent(event)
 
+    def _run_python(self, command):
+        import io
+        import sys
+        
+        output_buffer = io.StringIO()
+        old_stdout = sys.stdout
+        sys.stdout = output_buffer
+        
+        try:
+            # Try to compile and run
+            try:
+                # First try eval (for expressions like '1+1')
+                code = compile(command, '<string>', 'eval')
+                result = eval(code, self._globals)
+            except SyntaxError:
+                # If syntax error, it might be a statement (like 'x = 1' or 'import os')
+                code = compile(command, '<string>', 'exec')
+                result = None
+                exec(code, self._globals)
+            
+            # Show captured print() outputs
+            output = output_buffer.getvalue()
+            if output:
+                self.append(f"<span style='color: {ThemeColors.TEXT};'>{output.rstrip()}</span>")
+            
+            # Show the result if it was an expression (like the result of 1+1)
+            if result is not None:
+                self.append(f"<span style='color: {ThemeColors.MAUVE};'>{repr(result)}</span>")
+                
+        except Exception as e:
+            self.append(f"<span style='color: {ThemeColors.RED};'>✗ Error: {e}</span>")
+        finally:
+            sys.stdout = old_stdout
+
     def _execute_command(self):
         cursor = self.textCursor()
         cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
         cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
         command = cursor.selectedText().strip()
 
-        if command.startswith("> "):
+        # Remove prompt symbols
+        # Handle different prompt symbols
+        if command.startswith("❯ "):
             command = command[2:]
+        elif command.startswith(">>> "):
+            command = command[4:]
+        elif command.startswith("> "):
+            command = command[2:]
+        elif "❯" in command: # Fallback for just '❯' without space, or if it's part of a longer prompt
+            command = command.split("❯")[-1].strip()
+        elif command.startswith(">"): # Fallback for just '>' without space
+            command = command[1:]
+
+        command = command.strip()
+
+        if not command:
+            self.append("")
+            self._prompt()
+            return
+
+        if command.lower() in ["clear", "cls", "clear()"]:
+            self.clear()
+            self._prompt()
+            return
 
         self.append("")
+        self._history.append(command)
+        self._history_index = len(self._history)
 
-        if command:
-            self._history.append(command)
-            self._history_index = len(self._history)
+        # Handle pip commands specially
+        if command.startswith("!pip ") or command.startswith("pip "):
+            self._run_pip_command(command)
+        else:
             self._run_python(command)
 
         self._prompt()
 
-    def _run_python(self, command):
-        try:
-            old_stdout = sys.stdout
-            sys.stdout = io.StringIO()
+    def _run_pip_command(self, command):
+        """Run pip command to install packages"""
+        import subprocess
+        import sys
 
-            try:
-                result = eval(command, {"__builtins__": __builtins__}, {})
-                output = sys.stdout.getvalue()
-                if output:
-                    self.append(
-                        f"<span style='color: #00ff00;'>{output.rstrip()}</span>"
-                    )
-                if result is not None:
-                    self.append(f"<span style='color: #00ff00;'>{repr(result)}</span>")
-            except SyntaxError:
-                try:
-                    exec(command, {"__builtins__": __builtins__}, {})
-                    output = sys.stdout.getvalue()
-                    if output:
-                        self.append(
-                            f"<span style='color: #00ff00;'>{output.rstrip()}</span>"
-                        )
-                except Exception as e:
-                    self.append(f"<span style='color: #ff0000;'>Error: {e}</span>")
-            finally:
-                sys.stdout = old_stdout
+        # Remove !pip or pip prefix
+        if command.startswith("!pip"):
+            command = command[5:].strip()
+        else:
+            command = command[4:].strip()
+
+        self.append(
+            f"<span style='color: {ThemeColors.YELLOW};'>[Running pip {command}]</span>"
+        )
+
+        try:
+            result = subprocess.run(
+                [sys.executable, "-m", "pip"] + command.split(),
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+
+            if result.stdout:
+                self.append(
+                    f"<span style='color: {ThemeColors.TEXT};'>{result.stdout}</span>"
+                )
+            if result.stderr:
+                self.append(
+                    f"<span style='color: {ThemeColors.RED};'>{result.stderr}</span>"
+                )
+
+            if result.returncode == 0:
+                self.append(
+                    f"<span style='color: {ThemeColors.GREEN};'>[Package installed successfully]</span>"
+                )
+            else:
+                self.append(
+                    f"<span style='color: {ThemeColors.RED};'>[Error: {result.returncode}]</span>"
+                )
+
+        except subprocess.TimeoutExpired:
+            self.append(
+                f"<span style='color: {ThemeColors.RED};'>[Error: Installation timed out]</span>"
+            )
         except Exception as e:
-            self.append(f"<span style='color: #ff0000;'>Error: {e}</span>")
+            self.append(
+                f"<span style='color: {ThemeColors.RED};'>[Error: {str(e)}]</span>"
+            )
 
     def _history_navigate(self, direction):
         if not self._history:
@@ -144,7 +262,7 @@ class TerminalWidget(QTextEdit):
         cursor.movePosition(QTextCursor.MoveOperation.StartOfLine)
         cursor.select(QTextCursor.SelectionType.BlockUnderCursor)
         cursor.removeSelectedText()
-        cursor.insertText(f">>> {self._history[self._history_index]}")
+        cursor.insertText(f"&gt;&gt;&gt; {self._history[self._history_index]}")
 
 
 class PYXCEL(QMainWindow):
@@ -158,11 +276,77 @@ class PYXCEL(QMainWindow):
         self.macro_runner = MacroRunner(macro_manager)
 
         self._setup_ui()
+        self._set_theme()
         self._connect_signals()
         self._create_default_sheet()
 
         self.setWindowTitle("PYXCEL")
         self.resize(900, 600)
+
+    def toggle_theme(self):
+        """Alternar entre tema oscuro (Dark) y claro (Light)"""
+        current_mode = theme_manager.get_mode()
+        new_mode = "light" if current_mode == "dark" else "dark"
+        theme_manager.set_mode(new_mode)
+        
+        # Apply theme globally to the QApplication
+        app = QApplication.instance()
+        if app:
+            app.setPalette(get_palette())
+            app.setStyleSheet(get_app_stylesheet())
+        
+        # Refresh specific widgets and managers
+        self._refresh_all_styles()
+
+    def _refresh_all_styles(self):
+        """Actualizar los estilos de todos los componentes visuales"""
+        # Global Window Style
+        self.setPalette(get_palette())
+        self.setStyleSheet(get_app_stylesheet())
+        
+        # Toolbar & Menus
+        self.toolbar_manager.update_style()
+        self.menu_manager.update_style()
+        
+        # Right Panel Components
+        self.terminal.update_style()
+        if hasattr(self, 'spreadsheet') and self.spreadsheet:
+            self.spreadsheet.update_style()
+            
+        # Left Panel (Sheets and Charts list)
+        self._refresh_left_panel_style()
+
+    def _refresh_left_panel_style(self):
+        """Actualizar el estilo del panel izquierdo"""
+        C = theme_manager.colors
+        
+        self.left_tabs.setStyleSheet(f"""
+            QTabWidget::pane {{ background-color: {C.CRUST}; border: none; border-left: 1px solid {C.SURFACE0}; }}
+            QTabBar::tab {{ background-color: {C.MANTLE}; color: {C.SUBTEXT0}; padding: 12px 16px; border: none; border-bottom: 1px solid {C.SURFACE0}; font-weight: 500; }}
+            QTabBar::tab:selected {{ background-color: {C.CRUST}; color: {C.BLUE}; border-left: 3px solid {C.BLUE}; }}
+            QTabBar::tab:hover {{ background-color: {C.SURFACE0}; }}
+        """)
+        
+        self.shell_list.setStyleSheet(f"""
+            QListWidget {{ background-color: {C.MANTLE}; color: {C.SUBTEXT0}; border: none; padding: 8px; }}
+            QListWidget::item {{ padding: 6px 10px; border-radius: 4px; color: {C.SUBTEXT1}; }}
+            QListWidget::item:selected {{ background-color: {C.BLUE}; color: {C.CRUST}; }}
+            QListWidget::item:hover {{ background-color: {C.SURFACE0}; }}
+        """)
+        
+        self.browser_tree.setStyleSheet(f"""
+            QTreeWidget {{ background-color: {C.MANTLE}; color: {C.TEXT}; border: none; padding: 8px; }}
+            QTreeWidget::item {{ padding: 6px 10px; border-radius: 4px; }}
+            QTreeWidget::item:selected {{ background-color: {C.BLUE}; color: {C.CRUST}; }}
+            QTreeWidget::item:hover {{ background-color: {C.SURFACE0}; }}
+            QHeaderView::section {{ background-color: {C.MANTLE}; color: {C.SUBTEXT0}; border: none; font-weight: bold; padding: 8px; }}
+        """)
+        
+        if hasattr(self, 'left_panel') and self.left_panel:
+            self.left_panel.setStyleSheet(f"background-color: {C.CRUST}; border-right: 1px solid {C.SURFACE0};")
+
+    def _set_theme(self):
+        self._refresh_all_styles()
 
     def _setup_ui(self):
         self.toolbar_manager = ToolbarManager(self)
@@ -238,20 +422,21 @@ class PYXCEL(QMainWindow):
                 "--",
             ]
         )
-        self.shell_list.setMaximumWidth(120)
 
         self.browser_tree = QTreeWidget()
         self.browser_tree.setHeaderLabel("Explorador")
-        self.browser_tree.setMaximumWidth(150)
+        self.browser_tree.setIndentation(16)
 
-        root_item = QTreeWidgetItem(["PYXCEL"])
-        child1 = QTreeWidgetItem(["Hoja1"])
+        root_item = QTreeWidgetItem(["[B] PYXCEL"])
+        root_item.setForeground(0, QColor(ThemeColors.BLUE))
+        child1 = QTreeWidgetItem(["[S] Hoja1"])
+        child1.setForeground(0, QColor(ThemeColors.TEXT))
         root_item.addChild(child1)
         self.browser_tree.addTopLevelItem(root_item)
         self.browser_tree.expandAll()
 
-        self.left_tabs.addTab(self.shell_list, "Terminal")
-        self.left_tabs.addTab(self.browser_tree, "Explorador")
+        self.left_tabs.addTab(self.shell_list, "Shell")
+        self.left_tabs.addTab(self.browser_tree, "Archivos")
 
         left_layout.addWidget(self.left_tabs)
 
@@ -529,11 +714,136 @@ class PYXCEL(QMainWindow):
             sheet.insert_columns(col, 1)
 
     def insert_chart(self):
+        sheet = self.get_current_sheet()
+        if not sheet:
+            QMessageBox.warning(self, "Gráfico", "No hay hoja de cálculo activa")
+            return
+
         dialog = InsertChartDialog(self)
         if dialog.exec():
-            QMessageBox.information(
-                self, "Gráfico", "Función de gráficos en desarrollo"
+            chart_type = dialog.get_chart_type()
+            data_range = dialog.get_data_range()
+            labels_range = dialog.get_labels_range()
+
+            if not data_range:
+                QMessageBox.warning(
+                    self, "Gráfico", "Por favor especifique un rango de datos"
+                )
+                return
+
+            data = self._parse_range_to_data(sheet, data_range, labels_range)
+            if not data:
+                QMessageBox.warning(
+                    self,
+                    "Gráfico",
+                    "No se pudieron obtener datos del rango especificado",
+                )
+                return
+
+            chart_builder = ChartBuilder()
+            canvas = None
+
+            if "Barras" in chart_type and "apiladas" not in chart_type:
+                canvas = chart_builder.create_bar_chart(data, "Gráfico de Barras")
+            elif "Barras apiladas" in chart_type:
+                canvas = chart_builder.create_stacked_bar_chart(data, "Barras Apiladas")
+            elif "Líneas" in chart_type and "apiladas" not in chart_type:
+                canvas = chart_builder.create_line_chart(data, "Gráfico de Líneas")
+            elif "Líneas apiladas" in chart_type:
+                canvas = chart_builder.create_stacked_line_chart(
+                    data, "Líneas Apiladas"
+                )
+            elif "Circular" in chart_type or "Pie" in chart_type:
+                canvas = chart_builder.create_pie_chart(data, "Gráfico Circular")
+            elif "Dispersión" in chart_type or "Scatter" in chart_type:
+                canvas = chart_builder.create_scatter_chart(
+                    data, "Gráfico de Dispersión"
+                )
+            elif "Área" in chart_type and "apilada" not in chart_type:
+                canvas = chart_builder.create_area_chart(data, "Gráfico de Área")
+            elif "Área apilada" in chart_type:
+                canvas = chart_builder.create_stacked_area_chart(data, "Área Apilada")
+
+            if canvas:
+                self._show_chart_window(canvas, chart_type)
+
+    def _parse_range_to_data(
+        self, sheet, data_range: str, labels_range: str = None
+    ) -> dict:
+        import re
+
+        match = re.match(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", data_range.upper())
+        if not match:
+            return {}
+
+        start_col = self._letter_to_col(match.group(1))
+        start_row = int(match.group(2)) - 1
+        end_col = self._letter_to_col(match.group(3))
+        end_row = int(match.group(4)) - 1
+
+        labels = []
+        if labels_range:
+            label_match = re.match(r"([A-Z]+)(\d+):([A-Z]+)(\d+)", labels_range.upper())
+            if label_match:
+                l_start_col = self._letter_to_col(label_match.group(1))
+                l_start_row = int(label_match.group(2)) - 1
+                for col in range(l_start_col, l_start_col + (end_col - start_col + 1)):
+                    val = sheet.get_cell_value(l_start_row, col)
+                    labels.append(str(val) if val is not None else f"Item{col}")
+        else:
+            for col in range(start_col, end_col + 1):
+                labels.append(f"Col{chr(65 + col)}")
+
+        data = {}
+        for col in range(start_col, end_col + 1):
+            key = (
+                labels[col - start_col]
+                if col - start_col < len(labels)
+                else f"Col{col}"
             )
+            values = []
+            for row in range(start_row, end_row + 1):
+                val = sheet.get_cell_value(row, col)
+                if val is not None:
+                    try:
+                        values.append(float(val))
+                    except (ValueError, TypeError):
+                        pass
+            if values:
+                data[key] = sum(values) / len(values) if len(values) > 1 else values[0]
+
+        return data
+
+    def _letter_to_col(self, letter: str) -> int:
+        col = 0
+        for char in letter.upper():
+            col = col * 26 + (ord(char) - ord("A") + 1)
+        return col - 1
+
+    def _show_chart_window(self, canvas, chart_type: str):
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{chart_type} - PYXCEL")
+        dialog.setMinimumSize(700, 500)
+
+        layout = QVBoxLayout(dialog)
+
+        scroll = QScrollArea()
+        scroll.setWidget(canvas)
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {ThemeColors.BASE};
+                border: none;
+            }}
+        """)
+
+        layout.addWidget(scroll)
+
+        close_btn = QPushButton("Cerrar")
+        close_btn.clicked.connect(dialog.close)
+        layout.addWidget(close_btn)
+
+        dialog.exec()
 
     def format_cells(self):
         dialog = FormatCellsDialog(self)
@@ -558,9 +868,9 @@ class PYXCEL(QMainWindow):
         dialog.set_columns(columns)
 
         if dialog.exec():
-            col_index = dialog.get_column_index()
-            ascending = dialog.get_ascending()
-            sheet.sort_by_column(col_index, ascending)
+            sort_levels = dialog.get_sort_levels()
+            if sort_levels:
+                sheet.sort_by_multiple_columns(sort_levels)
 
     def filter_data(self):
         sheet = self.get_current_sheet()
@@ -706,11 +1016,127 @@ class PYXCEL(QMainWindow):
 
 
 def main():
+    from PySide6.QtGui import QPixmap, QPainter, QFont
+    from PySide6.QtCore import Qt, QTimer
+
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
 
+    # Create splash screen
+    splash_pixmap = QPixmap(500, 350)
+    splash_pixmap.fill(QColor(ThemeColors.CRUST))
+
+    # Draw splash content
+    painter = QPainter(splash_pixmap)
+    painter.setPen(QColor(ThemeColors.BLUE))
+    painter.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))
+    painter.drawText(
+        splash_pixmap.rect().adjusted(0, 60, 0, -180),
+        Qt.AlignmentFlag.AlignHCenter,
+        "PYXCEL",
+    )
+
+    painter.setPen(QColor(ThemeColors.SUBTEXT0))
+    painter.setFont(QFont("Segoe UI", 12))
+    painter.drawText(
+        splash_pixmap.rect().adjusted(0, 120, 0, -120),
+        Qt.AlignmentFlag.AlignHCenter,
+        "Hoja de Calculo Python",
+    )
+
+    # Loading bar background
+    painter.setBrush(QColor(ThemeColors.SURFACE0))
+    painter.setPen(QColor(ThemeColors.SURFACE1))
+    bar_rect = splash_pixmap.rect().adjusted(50, 250, -50, -80)
+    painter.drawRect(bar_rect)
+
+    # Loading bar progress
+    painter.setBrush(QColor(ThemeColors.BLUE))
+    painter.setPen(Qt.PenStyle.NoPen)
+    progress_rect = bar_rect.adjusted(2, 2, -2, -2)
+    progress_width = int(progress_rect.width() * 0.25)
+    painter.drawRect(
+        progress_rect.adjusted(0, 0, -progress_rect.width() + progress_width, 0)
+    )
+
+    painter.setPen(QColor(ThemeColors.SUBTEXT1))
+    painter.setFont(QFont("Segoe UI", 10))
+    painter.drawText(
+        splash_pixmap.rect().adjusted(0, 290, 0, -30),
+        Qt.AlignmentFlag.AlignHCenter,
+        "Cargando componentes...",
+    )
+    painter.end()
+
+    splash = QSplashScreen(splash_pixmap, Qt.WindowType.WindowStaysOnTopHint)
+    splash.show()
+    app.processEvents()
+
+    # Apply global theme
+    app.setPalette(get_palette())
+    app.setStyleSheet(get_app_stylesheet())
+
+    # Set application-level attributes
+    app.setAttribute(Qt.ApplicationAttribute.AA_UseHighDpiPixmaps)
+
+    # Simulate loading time
+    import time
+
+    for i in range(1, 5):
+        time.sleep(0.5)
+        # Update progress bar
+        splash_pixmap.fill(QColor(ThemeColors.CRUST))
+        painter = QPainter(splash_pixmap)
+        painter.setPen(QColor(ThemeColors.BLUE))
+        painter.setFont(QFont("Segoe UI", 28, QFont.Weight.Bold))
+        painter.drawText(
+            splash_pixmap.rect().adjusted(0, 60, 0, -180),
+            Qt.AlignmentFlag.AlignHCenter,
+            "PYXCEL",
+        )
+
+        painter.setPen(QColor(ThemeColors.SUBTEXT0))
+        painter.setFont(QFont("Segoe UI", 12))
+        painter.drawText(
+            splash_pixmap.rect().adjusted(0, 120, 0, -120),
+            Qt.AlignmentFlag.AlignHCenter,
+            "Hoja de Calculo Python",
+        )
+
+        painter.setBrush(QColor(ThemeColors.SURFACE0))
+        painter.setPen(QColor(ThemeColors.SURFACE1))
+        bar_rect = splash_pixmap.rect().adjusted(50, 250, -50, -80)
+        painter.drawRect(bar_rect)
+
+        painter.setBrush(QColor(ThemeColors.BLUE))
+        painter.setPen(Qt.PenStyle.NoPen)
+        progress_rect = bar_rect.adjusted(2, 2, -2, -2)
+        progress_width = int(progress_rect.width() * (i / 4))
+        painter.drawRect(
+            progress_rect.adjusted(0, 0, -progress_rect.width() + progress_width, 0)
+        )
+
+        painter.setPen(QColor(ThemeColors.SUBTEXT1))
+        painter.setFont(QFont("Segoe UI", 10))
+        messages = [
+            "Cargando componentes...",
+            "Inicializando motor...",
+            "Preparando interfaz...",
+            "Cargando hojas de calculo...",
+        ]
+        painter.drawText(
+            splash_pixmap.rect().adjusted(0, 290, 0, -30),
+            Qt.AlignmentFlag.AlignHCenter,
+            messages[i - 1],
+        )
+        painter.end()
+
+        splash.setPixmap(splash_pixmap)
+        app.processEvents()
+
     window = PYXCEL()
     window.show()
+    splash.finish(window)
 
     sys.exit(app.exec())
 

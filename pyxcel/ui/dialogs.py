@@ -19,10 +19,46 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtGui import QColor, QFont
 
+from .theme import ThemeColors
+
 
 class FindReplaceDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {ThemeColors.CRUST};
+                color: {ThemeColors.TEXT};
+            }}
+            QLabel {{
+                color: {ThemeColors.TEXT};
+            }}
+            QLineEdit {{
+                background-color: {ThemeColors.MANTLE};
+                color: {ThemeColors.TEXT};
+                border: 1px solid {ThemeColors.SURFACE0};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+            QCheckBox {{
+                color: {ThemeColors.TEXT};
+            }}
+            QTabWidget::pane {{
+                background-color: {ThemeColors.CRUST};
+                border: 1px solid {ThemeColors.SURFACE0};
+                border-radius: 8px;
+            }}
+            QTabBar::tab {{
+                background-color: {ThemeColors.MANTLE};
+                color: {ThemeColors.SUBTEXT0};
+                padding: 8px 16px;
+                border-radius: 6px 6px 0 0;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {ThemeColors.CRUST};
+                color: {ThemeColors.TEXT};
+            }}
+        """)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -142,6 +178,52 @@ class FindReplaceDialog(QDialog):
 class FormatCellsDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {ThemeColors.CRUST};
+                color: {ThemeColors.TEXT};
+            }}
+            QGroupBox {{
+                background-color: {ThemeColors.MANTLE};
+                color: {ThemeColors.SUBTEXT0};
+                border: 1px solid {ThemeColors.SURFACE0};
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 12px;
+                font-weight: 600;
+            }}
+            QGroupBox::title {{
+                color: {ThemeColors.TEXT};
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 8px;
+            }}
+            QComboBox, QSpinBox, QFontComboBox {{
+                background-color: {ThemeColors.SURFACE0};
+                color: {ThemeColors.TEXT};
+                border: 1px solid {ThemeColors.SURFACE1};
+                border-radius: 6px;
+                padding: 6px 10px;
+            }}
+            QCheckBox {{
+                color: {ThemeColors.TEXT};
+            }}
+            QTabWidget::pane {{
+                background-color: {ThemeColors.CRUST};
+                border: 1px solid {ThemeColors.SURFACE0};
+                border-radius: 8px;
+            }}
+            QTabBar::tab {{
+                background-color: {ThemeColors.MANTLE};
+                color: {ThemeColors.SUBTEXT0};
+                padding: 8px 16px;
+                border-radius: 6px 6px 0 0;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {ThemeColors.CRUST};
+                color: {ThemeColors.TEXT};
+            }}
+        """)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -273,6 +355,37 @@ class FormatCellsDialog(QDialog):
 class InsertChartDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {ThemeColors.CRUST};
+                color: {ThemeColors.TEXT};
+            }}
+            QGroupBox {{
+                background-color: {ThemeColors.MANTLE};
+                color: {ThemeColors.SUBTEXT0};
+                border: 1px solid {ThemeColors.SURFACE0};
+                border-radius: 8px;
+                margin-top: 12px;
+                padding-top: 12px;
+                font-weight: 600;
+            }}
+            QGroupBox::title {{
+                color: {ThemeColors.TEXT};
+                subcontrol-origin: margin;
+                subcontrol-position: top left;
+                padding: 0 8px;
+            }}
+            QComboBox, QLineEdit {{
+                background-color: {ThemeColors.SURFACE0};
+                color: {ThemeColors.TEXT};
+                border: 1px solid {ThemeColors.SURFACE1};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+            QLabel {{
+                color: {ThemeColors.TEXT};
+            }}
+        """)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -337,24 +450,51 @@ class InsertChartDialog(QDialog):
 class SortDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._sort_levels = []
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {ThemeColors.CRUST};
+                color: {ThemeColors.TEXT};
+            }}
+            QComboBox {{
+                background-color: {ThemeColors.SURFACE0};
+                color: {ThemeColors.TEXT};
+                border: 1px solid {ThemeColors.SURFACE1};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+            QLabel {{
+                color: {ThemeColors.TEXT};
+            }}
+            QPushButton {{
+                background-color: {ThemeColors.SURFACE0};
+                color: {ThemeColors.TEXT};
+                border: 1px solid {ThemeColors.SURFACE1};
+                border-radius: 6px;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {ThemeColors.SURFACE1};
+                border-color: {ThemeColors.BLUE};
+            }}
+        """)
         self._setup_ui()
 
     def _setup_ui(self):
         self.setWindowTitle("Ordenar")
         self.setModal(True)
+        self.setMinimumWidth(400)
 
         layout = QVBoxLayout(self)
 
-        form_layout = QFormLayout()
+        self.sort_levels_layout = QVBoxLayout()
+        layout.addLayout(self.sort_levels_layout)
 
-        self.column_combo = QComboBox()
-        form_layout.addRow("Columna:", self.column_combo)
+        add_level_btn = QPushButton("+ Agregar nivel")
+        add_level_btn.clicked.connect(self._add_sort_level)
+        layout.addWidget(add_level_btn)
 
-        self.order_combo = QComboBox()
-        self.order_combo.addItems(["Ascendente", "Descendente"])
-        form_layout.addRow("Orden:", self.order_combo)
-
-        layout.addLayout(form_layout)
+        self._add_sort_level()
 
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -363,6 +503,35 @@ class SortDialog(QDialog):
         buttons.rejected.connect(self.reject)
 
         layout.addWidget(buttons)
+
+    def _add_sort_level(self):
+        level_layout = QHBoxLayout()
+
+        column_combo = QComboBox()
+        order_combo = QComboBox()
+        order_combo.addItems(["Ascendente", "Descendente"])
+
+        level_layout.addWidget(column_combo)
+        level_layout.addWidget(order_combo)
+
+        self.sort_levels_layout.addLayout(level_layout)
+
+        self._sort_levels.append({"column": column_combo, "order": order_combo})
+
+    def set_columns(self, columns: list):
+        for level in self._sort_levels:
+            level["column"].clear()
+            for col in columns:
+                level["column"].addItem(col)
+
+    def get_sort_levels(self) -> list:
+        levels = []
+        for level in self._sort_levels:
+            col_index = level["column"].currentIndex()
+            ascending = level["order"].currentIndex() == 0
+            if col_index >= 0:
+                levels.append({"column": col_index, "ascending": ascending})
+        return levels
 
     def set_columns(self, columns: list):
         self.column_combo.clear()
@@ -379,6 +548,22 @@ class SortDialog(QDialog):
 class FilterDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setStyleSheet(f"""
+            QDialog {{
+                background-color: {ThemeColors.CRUST};
+                color: {ThemeColors.TEXT};
+            }}
+            QComboBox, QLineEdit {{
+                background-color: {ThemeColors.SURFACE0};
+                color: {ThemeColors.TEXT};
+                border: 1px solid {ThemeColors.SURFACE1};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+            QLabel {{
+                color: {ThemeColors.TEXT};
+            }}
+        """)
         self._setup_ui()
 
     def _setup_ui(self):

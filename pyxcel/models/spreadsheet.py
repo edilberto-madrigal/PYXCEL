@@ -16,19 +16,25 @@ class CellData:
 
 
 class CellFormat:
+    # Default dark theme colors
+    DEFAULT_BG = QColor("#11111B")
+    DEFAULT_TEXT = QColor("#CDD6F4")
+
     def __init__(self):
         self.bold = False
         self.italic = False
         self.underline = False
         self.font_size = 10
-        self.font_color = QColor(0, 0, 0)
-        self.bg_color = QColor(255, 255, 255)
+        self.font_color = self.DEFAULT_TEXT
+        self.bg_color = self.DEFAULT_BG
         self.alignment = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         self.number_format = "General"
         self.border_top = False
         self.border_bottom = False
         self.border_left = False
         self.border_right = False
+        self.border_color = QColor("#45475A")
+        self.font_family = "JetBrains Mono"
 
 
 class SpreadsheetModel(QAbstractTableModel):
@@ -76,12 +82,12 @@ class SpreadsheetModel(QAbstractTableModel):
         self,
         section: int,
         orientation: Qt.Orientation,
-        role: int = Qt.ItemDataRole.DisplayRole,
+        role: int = Qt.DisplayRole,
     ):
-        if role == Qt.ItemDataRole.DisplayRole:
-            if orientation == Qt.Orientation.Horizontal:
+        if role == Qt.DisplayRole or role == 0:
+            if orientation == Qt.Horizontal or orientation == 1:
                 return self._col_num_to_letter(section)
-            elif orientation == Qt.Orientation.Vertical:
+            elif orientation == Qt.Vertical or orientation == 2:
                 return str(section + 1)
         return None
 
@@ -96,9 +102,9 @@ class SpreadsheetModel(QAbstractTableModel):
             if role == Qt.ItemDataRole.DisplayRole:
                 return ""
             elif role == Qt.ItemDataRole.BackgroundRole:
-                return QColor(255, 255, 255)
+                return CellFormat.DEFAULT_BG
             elif role == Qt.ItemDataRole.ForegroundRole:
-                return QColor(0, 0, 0)
+                return CellFormat.DEFAULT_TEXT
             return None
 
         if role == Qt.ItemDataRole.DisplayRole:
@@ -107,7 +113,7 @@ class SpreadsheetModel(QAbstractTableModel):
             return str(cell.value) if cell.value is not None else ""
 
         elif role == Qt.ItemDataRole.ForegroundRole:
-            return QColor(0, 0, 0)
+            return cell.format.font_color
 
         elif role == Qt.ItemDataRole.EditRole:
             if cell.formula:
@@ -117,11 +123,8 @@ class SpreadsheetModel(QAbstractTableModel):
         elif role == Qt.ItemDataRole.BackgroundRole:
             return cell.format.bg_color
 
-        elif role == Qt.ItemDataRole.ForegroundRole:
-            return cell.format.font_color
-
         elif role == Qt.ItemDataRole.FontRole:
-            font = QFont()
+            font = QFont(cell.format.font_family)
             font.setPointSize(cell.format.font_size)
             font.setBold(cell.format.bold)
             font.setItalic(cell.format.italic)
@@ -354,6 +357,9 @@ class SpreadsheetModel(QAbstractTableModel):
     def can_redo(self) -> bool:
         return len(self._redo_stack) > 0
 
+    def get_undo_stack(self) -> List[Dict]:
+        return self._undo_stack
+
     def clear(self):
         self.beginResetModel()
         self._data.clear()
@@ -397,6 +403,40 @@ class SpreadsheetModel(QAbstractTableModel):
 
         new_data = {}
         for new_row, (value, old_row) in enumerate(items):
+            for c in range(self._cols):
+                if (old_row, c) in self._data:
+                    new_data[(new_row, c)] = self._data[(old_row, c)]
+
+        self._data = new_data
+        self.beginResetModel()
+        self.endResetModel()
+
+    def sort_by_multiple_columns(self, sort_levels: list):
+        if not sort_levels:
+            return
+
+        items = []
+        for row in range(self._rows):
+            values = []
+            for level in sort_levels:
+                col = level["column"]
+                cell = self._data.get((row, col))
+                value = cell.value if cell else None
+                values.append(value)
+            items.append((values, row))
+
+        def sort_key(item):
+            values = item[0]
+            result = []
+            for i, level in enumerate(sort_levels):
+                val = values[i] if i < len(values) else None
+                result.append((val is None, val))
+            return tuple(result)
+
+        items.sort(key=sort_key, reverse=False)
+
+        new_data = {}
+        for new_row, (values, old_row) in enumerate(items):
             for c in range(self._cols):
                 if (old_row, c) in self._data:
                     new_data[(new_row, c)] = self._data[(old_row, c)]

@@ -95,6 +95,70 @@ class MacroManager:
             }
         return {}
 
+    def serialize(self) -> Dict:
+        return {
+            "macros": {
+                name: {
+                    "name": macro.name,
+                    "description": macro.description,
+                }
+                for name, macro in self._macros.items()
+            },
+            "groups": self._macro_groups.copy(),
+        }
+
+    def deserialize(self, data: Dict):
+        self._macro_groups = data.get("groups", {})
+
+        macros_data = data.get("macros", {})
+        for name, macro_info in macros_data.items():
+            if name not in self._macros:
+                pass
+
+    def to_python_code(self) -> str:
+        code_lines = [
+            "# PYXCEL Macros",
+            "# Generated automatically",
+            "",
+            "from pyxcel.macros.macro_system import macro",
+            "",
+        ]
+
+        for name, macro in self._macros.items():
+            code_lines.append(
+                f'@macro(name="{name}", description="{macro.description}")'
+            )
+            code_lines.append(f"def {name}():")
+            code_lines.append(f'    """{macro.description}"""')
+            code_lines.append("    pass")
+            code_lines.append("")
+
+        return "\n".join(code_lines)
+
+    def save_to_file(self, file_path: str) -> bool:
+        import json
+
+        try:
+            data = self.serialize()
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2, ensure_ascii=False)
+            return True
+        except Exception as e:
+            print(f"Error saving macros: {e}")
+            return False
+
+    def load_from_file(self, file_path: str) -> bool:
+        import json
+
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.deserialize(data)
+            return True
+        except Exception as e:
+            print(f"Error loading macros: {e}")
+            return False
+
     def clear(self):
         self._macros.clear()
         self._macro_groups.clear()

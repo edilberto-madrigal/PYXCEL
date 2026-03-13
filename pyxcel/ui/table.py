@@ -15,6 +15,7 @@ from PySide6.QtCore import Qt, QModelIndex, Signal, QItemSelectionModel
 from PySide6.QtGui import QFont, QKeyEvent
 
 from ..models.spreadsheet import SpreadsheetModel
+from .theme import theme_manager, ThemeColors, ThemeFonts, get_app_stylesheet
 
 
 class SpreadsheetView(QTableView):
@@ -24,11 +25,10 @@ class SpreadsheetView(QTableView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._current_row = 0
         self._current_col = 0
-        self._setup_ui()
+        self.update_style()
 
-    def _setup_ui(self):
+    def update_style(self):
         self.setAlternatingRowColors(True)
         self.setShowGrid(True)
         self.setSelectionBehavior(QTableView.SelectionBehavior.SelectItems)
@@ -41,41 +41,58 @@ class SpreadsheetView(QTableView):
             | QTableView.EditTrigger.AnyKeyPressed
         )
 
-        font = QFont("Courier New", 10)
+        # Use JetBrains Mono or fallback
+        font = QFont("JetBrains Mono")
+        font.setStyleHint(QFont.StyleHint.Monospace)
+        font.setPointSize(10)
         self.setFont(font)
 
         self.horizontalHeader().setStretchLastSection(False)
         self.verticalHeader().setStretchLastSection(False)
 
-        self.horizontalHeader().setDefaultSectionSize(80)
-        self.verticalHeader().setDefaultSectionSize(20)
+        self.horizontalHeader().setDefaultSectionSize(90)
+        self.verticalHeader().setDefaultSectionSize(26)
 
-        self.setStyleSheet("""
-            QTableView {
-                background-color: #FFFFFF;
-                color: #000000;
-                gridline-color: #D3D3D3;
-                alternate-background-color: #F8F8F8;
-            }
-            QTableView::item {
-                color: #000000;
-                background-color: #FFFFFF;
-            }
-            QTableView::item:selected {
-                background-color: #0078D7;
-                color: #FFFFFF;
-            }
-            QHeaderView::section {
-                background-color: #E0E0E0;
-                color: #000000;
-                padding: 4px;
-                border: 1px solid #D3D3D3;
-                font-weight: bold;
-            }
-            QTableCornerButton::section {
-                background-color: #E0E0E0;
-                border: 1px solid #D3D3D3;
-            }
+        # Theme stylesheet
+        C = theme_manager.colors
+        self.setStyleSheet(f"""
+            QTableView {{
+                background-color: {C.BASE};
+                color: {C.TEXT};
+                gridline-color: {C.GRID};
+                alternate-background-color: {C.ROW_ALT};
+                border: none;
+            }}
+            QTableView::item {{
+                background-color: {C.ROW_DEFAULT};
+                color: {C.TEXT};
+                padding: 2px 8px;
+                border: none;
+            }}
+            QTableView::item:selected {{
+                background-color: {C.SELECTION};
+                color: {C.SELECTION_TEXT};
+            }}
+            QTableView::item:hover {{
+                background-color: {C.HOVER};
+            }}
+            QHeaderView::section {{
+                background-color: {C.HEADER_BG};
+                color: {C.SUBTEXT0};
+                padding: 8px 12px;
+                border: none;
+                border-bottom: 2px solid {C.BLUE};
+                font-weight: 600;
+                font-size: {ThemeFonts.SIZES["small"]}px;
+            }}
+            QHeaderView::section:hover {{
+                background-color: {C.SURFACE0};
+                color: {C.TEXT};
+            }}
+            QTableCornerButton::section {{
+                background-color: {C.HEADER_BG};
+                border: none;
+            }}
         """)
 
         self.clicked.connect(self._on_cell_clicked)
@@ -142,19 +159,46 @@ class CellEditor(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._setup_ui()
+        self.update_style()
+
+    def update_style(self):
+        C = theme_manager.colors
+        self.position_label.setStyleSheet(f"""
+            QLabel {{
+                background-color: {C.SURFACE0};
+                color: {C.SUBTEXT0};
+                padding: 8px 10px;
+                border: none;
+                border-right: 1px solid {C.SURFACE1};
+                font-family: '{ThemeFonts.SPREADSHEET}', monospace;
+                font-size: {ThemeFonts.SIZES["small"]}px;
+                font-weight: 600;
+            }}
+        """)
+        self.formula_bar.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {C.BASE};
+                color: {C.TEXT};
+                border: none;
+                padding: 8px 12px;
+                font-family: '{ThemeFonts.SPREADSHEET}', monospace;
+                font-size: 13px;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {C.BLUE};
+            }}
+        """)
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
 
         self.position_label = QLabel("A1")
-        self.position_label.setFixedWidth(60)
-        self.position_label.setStyleSheet(
-            "QLabel { background-color: #f0f0f0; padding: 2px; }"
-        )
+        self.position_label.setFixedWidth(65)
 
         self.formula_bar = QLineEdit()
-        self.formula_bar.setFont(QFont("Courier New", 9))
+        self.formula_bar.setFont(QFont(ThemeFonts.SPREADSHEET, 10))
 
         layout.addWidget(self.position_label)
         layout.addWidget(self.formula_bar)
@@ -189,6 +233,11 @@ class SpreadsheetWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._setup_ui()
+        self.update_style()
+
+    def update_style(self):
+        self.cell_editor.update_style()
+        self.table_view.update_style()
 
     def _setup_ui(self):
         layout = QVBoxLayout(self)
